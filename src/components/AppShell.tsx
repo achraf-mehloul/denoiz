@@ -14,7 +14,10 @@ const nav = [
 export function AppShell() {
   const loc = useLocation();
   const [tick, setTick] = useState(0);
-  useEffect(() => ble.subscribe(() => setTick((t) => t + 1)), []);
+  useEffect(() => {
+    const unsub = ble.subscribe(() => setTick((t) => t + 1));
+    return () => { unsub(); };
+  }, []);
   const connected = ble.state === "connected";
 
   return (

@@ -10,8 +10,15 @@ export type BleLog = { ts: number; level: "info" | "warn" | "error" | "ok"; msg:
 
 type Listener = () => void;
 
+type AnyBleDevice = {
+  id: string;
+  name?: string;
+  gatt?: { connect: () => Promise<{ getPrimaryService: (s: string) => Promise<{ getCharacteristic: (c: string) => Promise<{ readValue: () => Promise<DataView> }> }> }>; disconnect: () => void };
+  addEventListener: (type: string, cb: () => void) => void;
+};
+
 class BluetoothManager {
-  device: BluetoothDevice | null = null;
+  device: AnyBleDevice | null = null;
   state: "idle" | "scanning" | "connecting" | "connected" | "disconnected" = "idle";
   rssi = 0;
   packetLoss = 0;
@@ -36,7 +43,7 @@ class BluetoothManager {
     try {
       this.state = "scanning"; this.emit();
       this.log("info", "Requesting BLE device…");
-      const device = await (navigator as Navigator & { bluetooth: { requestDevice: (o: object) => Promise<BluetoothDevice> } }).bluetooth.requestDevice({
+      const device = await (navigator as Navigator & { bluetooth: { requestDevice: (o: object) => Promise<AnyBleDevice> } }).bluetooth.requestDevice({
         acceptAllDevices: true,
         optionalServices: ["heart_rate", "battery_service", "device_information"],
       });
