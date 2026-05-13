@@ -22,7 +22,10 @@ function Dashboard() {
   const [bleTick, setBleTick] = useState(0);
   const startRef = useRef(Date.now());
 
-  useEffect(() => ble.subscribe(() => setBleTick((t) => t + 1)) as unknown as undefined, []);
+  useEffect(() => {
+    const unsub = ble.subscribe(() => setBleTick((t) => t + 1));
+    return () => { unsub(); };
+  }, []);
 
   useEffect(() => {
     const id = setInterval(() => {
