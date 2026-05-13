@@ -77,12 +77,12 @@ export function AppShell() {
         <main className="flex-1 min-w-0">
           <Outlet />
         </main>
-        <nav className="md:hidden grid grid-cols-4 border-t border-border/60 glass">
+        <nav className="md:hidden flex border-t border-border/60 glass overflow-x-auto">
           {nav.map((n) => {
             const active = loc.pathname === n.to;
             const Icon = n.icon;
             return (
-              <Link key={n.to} to={n.to} className={`flex flex-col items-center justify-center py-2 text-[10px] ${active ? "text-primary" : "text-muted-foreground"}`}>
+              <Link key={n.to} to={n.to} className={`flex-1 min-w-[4.5rem] flex flex-col items-center justify-center py-2 text-[10px] ${active ? "text-primary" : "text-muted-foreground"}`}>
                 <Icon className="h-4 w-4 mb-0.5" />
                 {n.label}
               </Link>
