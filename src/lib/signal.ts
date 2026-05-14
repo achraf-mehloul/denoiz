@@ -1,20 +1,34 @@
-// Central signal store. All waveform data flows through this module.
-// Samples are produced ONLY when a Bluetooth device is connected and
-// reporting heart-rate data. There is no demo / fallback generator.
+// Central signal store — STRICT REAL DATA ONLY.
+//
+// Samples and BPM measurements only enter this store from the BLE adapter
+// (`pushSample`, `pushBpm`). There is no synthetic generator, no fallback
+// waveform, no demo mode. Until a real packet arrives every getter returns
+// neutral values and the dashboard is expected to render an empty state.
 
-import { generateBeat } from "./ecg";
 import { SignalPipeline, defaultFilterParams, type FilterParams } from "./dsp";
+import { calibration } from "./calibration";
 
-export const SAMPLE_RATE = 250; // Hz
+export const SAMPLE_RATE = 250; // assumed Hz when raw waveform is streamed
 export const BUFFER_SECONDS = 12;
 export const BUFFER_SIZE = SAMPLE_RATE * BUFFER_SECONDS;
+export const BPM_HISTORY_MAX = 240; // ~ a few minutes of HR samples
 
 type Listener = () => void;
 
+export type BpmPoint = { t: number; bpm: number };
+
 export type SignalSnapshot = {
   bpm: number;
-  quality: number;        // 0-100 derived from packet stability
-  latencyMs: number;      // measured time between BLE notifications
+  bpmAvg: number;
+  bpmMin: number;
+  bpmMax: number;
+  quality: number;
+  hasRawWaveform: boolean;
+  hasBpm: boolean;
+  samplesReceived: number;
+  bpmReceived: number;
+  lastSampleAgeMs: number;
+  lastBpmAgeMs: number;
   streaming: boolean;
   recording: boolean;
   recordedSamples: number;
@@ -22,17 +36,23 @@ export type SignalSnapshot = {
 };
 
 class SignalStore {
-  // Triple-channel ring buffers (all share head index).
+  // Triple-channel ring buffers (raw waveform if device exposes one).
   original = new Float32Array(BUFFER_SIZE);
   noisy = new Float32Array(BUFFER_SIZE);
   filtered = new Float32Array(BUFFER_SIZE);
-  head = 0; // next write index
+  head = 0;
 
   // Live state.
   bpm = 0;
+  bpmHistory: BpmPoint[] = [];
   quality = 0;
-  latencyMs = 0;
   streaming = false;
+
+  samplesReceived = 0;
+  bpmReceived = 0;
+  lastSampleTs = 0;
+  lastBpmTs = 0;
+  bpmIntervalMs = 0;
 
   // Recording.
   recording = false;
@@ -40,18 +60,11 @@ class SignalStore {
   recOriginal: number[] = [];
   recNoisy: number[] = [];
   recFiltered: number[] = [];
+  recBpm: BpmPoint[] = [];
 
   // Filter pipeline used live for the "filtered" channel.
   filterParams: FilterParams = defaultFilterParams();
   pipeline = new SignalPipeline(this.filterParams, SAMPLE_RATE);
-
-  // Internal generator state.
-  private phase = 0;
-  private drift = 0;
-  private rafId = 0;
-  private lastTickMs = 0;
-  private lastBpmTs = 0;
-  private bpmIntervalMs = 0;
 
   private listeners = new Set<Listener>();
 
@@ -64,7 +77,7 @@ class SignalStore {
     this.emit();
   }
 
-  // BLE adapter pushes a new heart-rate measurement here.
+  // BLE adapter pushes a real heart-rate measurement here.
   pushBpm(bpm: number) {
     if (!Number.isFinite(bpm) || bpm <= 0) return;
     const now = performance.now();
@@ -73,60 +86,62 @@ class SignalStore {
       const expected = 60_000 / Math.max(bpm, 30);
       const ratio = Math.min(this.bpmIntervalMs, expected) / Math.max(this.bpmIntervalMs, expected);
       this.quality = Math.round(Math.max(40, Math.min(100, ratio * 100)));
-      this.latencyMs = Math.round(this.bpmIntervalMs);
     } else {
       this.quality = 100;
     }
     this.lastBpmTs = now;
     this.bpm = Math.round(bpm);
+    this.bpmReceived++;
+    const point: BpmPoint = { t: Date.now(), bpm: this.bpm };
+    this.bpmHistory.push(point);
+    if (this.bpmHistory.length > BPM_HISTORY_MAX) this.bpmHistory.shift();
+    if (this.recording) this.recBpm.push(point);
+    this.emit();
+  }
+
+  // BLE adapter pushes a raw ECG sample (already converted to mV by the
+  // device or its driver). Optional channel — many BLE sensors only expose
+  // BPM. When called, the buffers fill with REAL data only.
+  pushSample(raw: number) {
+    if (!Number.isFinite(raw)) return;
+    const v = calibration.apply(raw);
+    const filtered = this.pipeline.process(v);
+    this.write(v, v, filtered);
+    this.samplesReceived++;
+    this.lastSampleTs = performance.now();
+    this.streaming = true;
+    if (this.recording) {
+      this.recOriginal.push(v);
+      this.recNoisy.push(v);
+      this.recFiltered.push(filtered);
+    }
     this.emit();
   }
 
   start() {
-    if (this.streaming) return;
+    // Marks the store as actively expecting data. No synthetic generation.
     this.streaming = true;
-    this.lastTickMs = performance.now();
-    const tick = (t: number) => {
-      const dt = (t - this.lastTickMs) / 1000;
-      this.lastTickMs = t;
-      // Generate samples at SAMPLE_RATE.
-      const n = Math.max(1, Math.min(64, Math.round(dt * SAMPLE_RATE)));
-      const stepDt = dt / n;
-      const beatsPerSec = (this.bpm || 0) / 60;
-      for (let i = 0; i < n; i++) {
-        if (beatsPerSec > 0) {
-          this.phase += stepDt * beatsPerSec;
-          const original = generateBeat(this.phase);
-          // Realistic transmission artifacts present in raw BLE ECG capture.
-          this.drift = this.drift * 0.995 + (Math.random() - 0.5) * 0.004;
-          const hf = (Math.random() - 0.5) * 0.10;
-          const mains = Math.sin(t * 0.001 * 2 * Math.PI * this.filterParams.notch.freq) * 0.05;
-          const noisy = original + hf + mains + this.drift;
-          const filtered = this.pipeline.process(noisy);
-          this.write(original, noisy, filtered);
-          if (this.recording) {
-            this.recOriginal.push(original);
-            this.recNoisy.push(noisy);
-            this.recFiltered.push(filtered);
-          }
-        } else {
-          this.write(0, 0, 0);
-        }
-      }
-      this.rafId = requestAnimationFrame(tick);
-    };
-    this.rafId = requestAnimationFrame(tick);
+    this.emit();
   }
 
   stop() {
-    if (!this.streaming) return;
     this.streaming = false;
-    cancelAnimationFrame(this.rafId);
-    this.bpm = 0; this.quality = 0; this.latencyMs = 0;
+    this.bpm = 0;
+    this.quality = 0;
     this.lastBpmTs = 0;
+    this.lastSampleTs = 0;
+    this.bpmIntervalMs = 0;
     this.original.fill(0); this.noisy.fill(0); this.filtered.fill(0);
     this.head = 0;
+    this.samplesReceived = 0;
     this.pipeline.reset();
+    this.emit();
+  }
+
+  reset() {
+    this.stop();
+    this.bpmHistory = [];
+    this.bpmReceived = 0;
     this.emit();
   }
 
@@ -137,7 +152,7 @@ class SignalStore {
     this.head = (this.head + 1) % BUFFER_SIZE;
   }
 
-  // Render a window of `width` pixels into a destination Float32Array
+  // Render a window of `width` samples into a destination Float32Array
   // by sub-sampling the ring buffer (most-recent on the right).
   renderInto(channel: "original" | "noisy" | "filtered", dst: Float32Array) {
     const src = this[channel];
@@ -161,27 +176,47 @@ class SignalStore {
     this.recOriginal = [];
     this.recNoisy = [];
     this.recFiltered = [];
+    this.recBpm = [];
     this.emit();
   }
-  stopRecording(): { original: Float32Array; noisy: Float32Array; filtered: Float32Array; durationMs: number; startedAt: number } {
+
+  stopRecording() {
     this.recording = false;
     const out = {
       original: Float32Array.from(this.recOriginal),
       noisy: Float32Array.from(this.recNoisy),
       filtered: Float32Array.from(this.recFiltered),
+      bpm: this.recBpm.slice(),
       durationMs: Date.now() - this.recStart,
       startedAt: this.recStart,
     };
-    this.recOriginal = []; this.recNoisy = []; this.recFiltered = [];
+    this.recOriginal = []; this.recNoisy = []; this.recFiltered = []; this.recBpm = [];
     this.emit();
     return out;
   }
 
   snapshot(): SignalSnapshot {
+    const now = performance.now();
+    let avg = 0, min = Infinity, max = -Infinity;
+    for (const p of this.bpmHistory) {
+      avg += p.bpm;
+      if (p.bpm < min) min = p.bpm;
+      if (p.bpm > max) max = p.bpm;
+    }
+    if (this.bpmHistory.length > 0) avg = avg / this.bpmHistory.length;
+    else { min = 0; max = 0; }
     return {
       bpm: this.bpm,
+      bpmAvg: Math.round(avg),
+      bpmMin: Math.round(min),
+      bpmMax: Math.round(max),
       quality: this.quality,
-      latencyMs: this.latencyMs,
+      hasRawWaveform: this.samplesReceived > 0,
+      hasBpm: this.bpmReceived > 0,
+      samplesReceived: this.samplesReceived,
+      bpmReceived: this.bpmReceived,
+      lastSampleAgeMs: this.lastSampleTs ? Math.round(now - this.lastSampleTs) : -1,
+      lastBpmAgeMs: this.lastBpmTs ? Math.round(now - this.lastBpmTs) : -1,
       streaming: this.streaming,
       recording: this.recording,
       recordedSamples: this.recOriginal.length,
@@ -191,8 +226,3 @@ class SignalStore {
 }
 
 export const signal = new SignalStore();
-
-export function useSignalTick() {
-  // Lightweight subscription helper.
-  return signal;
-}

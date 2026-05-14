@@ -1,21 +1,33 @@
 import { useEffect, useRef } from "react";
+import { signal, BUFFER_SIZE } from "@/lib/signal";
+
+type Channel = "original" | "noisy" | "filtered";
 
 type Props = {
   color: string;
   label: string;
   unit?: string;
   height?: number;
-  getSample: () => number;
-  speed?: number;
+  channel: Channel;
   amplitude?: number;
+  samplesPerPixel?: number;
 };
 
-export function EcgWaveform({ color, label, unit = "mV", height = 180, getSample, speed = 2.2, amplitude = 1 }: Props) {
+// Renders the ring buffer for `channel` directly. Pure visualization of
+// data that already exists in `signal` — no synthetic motion is added when
+// the buffer is empty.
+export function EcgWaveform({
+  color,
+  label,
+  unit = "mV",
+  height = 180,
+  channel,
+  amplitude = 1,
+  samplesPerPixel = 1,
+}: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const bufferRef = useRef<number[]>([]);
   const rafRef = useRef<number>(0);
-  const lastTimeRef = useRef<number>(0);
 
   useEffect(() => {
     const canvas = canvasRef.current!;
@@ -23,7 +35,8 @@ export function EcgWaveform({ color, label, unit = "mV", height = 180, getSample
     const ctx = canvas.getContext("2d")!;
     let dpr = window.devicePixelRatio || 1;
     let width = 0;
-    let h = height;
+    const h = height;
+    let buf = new Float32Array(0);
 
     const resize = () => {
       dpr = window.devicePixelRatio || 1;
@@ -33,34 +46,39 @@ export function EcgWaveform({ color, label, unit = "mV", height = 180, getSample
       canvas.style.width = `${width}px`;
       canvas.style.height = `${h}px`;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      bufferRef.current = new Array(Math.floor(width)).fill(0);
+      const samples = Math.min(BUFFER_SIZE, Math.max(64, Math.floor(width * samplesPerPixel)));
+      buf = new Float32Array(samples);
     };
     resize();
     const ro = new ResizeObserver(resize);
     ro.observe(container);
 
-    const draw = (now: number) => {
-      const dt = lastTimeRef.current ? (now - lastTimeRef.current) / 1000 : 0.016;
-      lastTimeRef.current = now;
-      const stepsPerFrame = Math.max(1, Math.round(speed * 60 * dt));
-      const buf = bufferRef.current;
-      for (let i = 0; i < stepsPerFrame; i++) {
-        buf.shift();
-        buf.push(getSample());
-      }
+    const draw = () => {
+      signal.renderInto(channel, buf);
       ctx.clearRect(0, 0, width, h);
-      ctx.strokeStyle = "rgba(120,160,180,0.08)";
+
+      // Grid.
+      ctx.strokeStyle = "rgba(120,160,180,0.07)";
       ctx.lineWidth = 1;
       const grid = 24;
       for (let x = 0; x < width; x += grid) { ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, h); ctx.stroke(); }
       for (let y = 0; y < h; y += grid) { ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke(); }
 
+      // Auto-scale based on visible data.
+      let max = 0;
+      for (let i = 0; i < buf.length; i++) {
+        const a = Math.abs(buf[i]);
+        if (a > max) max = a;
+      }
+      const scale = max > 0 ? ((h / 2 - 8) / max) * amplitude : 0;
+
       ctx.beginPath();
       const mid = h / 2;
-      const amp = (h / 2 - 8) * amplitude;
-      for (let x = 0; x < buf.length; x++) {
-        const y = mid - buf[x] * amp;
-        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      const xStep = width / Math.max(1, buf.length - 1);
+      for (let i = 0; i < buf.length; i++) {
+        const y = mid - buf[i] * scale;
+        const x = i * xStep;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
       }
       ctx.shadowColor = color;
       ctx.shadowBlur = 8;
@@ -78,7 +96,7 @@ export function EcgWaveform({ color, label, unit = "mV", height = 180, getSample
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
     };
-  }, [color, height, getSample, speed, amplitude]);
+  }, [color, height, channel, amplitude, samplesPerPixel]);
 
   return (
     <div className="rounded-xl glass p-4">

@@ -20,7 +20,7 @@ export function AppShell() {
     const unsub = ble.subscribe(() => setTick((t) => t + 1));
     return () => { unsub(); };
   }, []);
-  const connected = ble.state === "connected";
+  const connected = ble.isLive();
 
   return (
     <div className="min-h-screen flex">

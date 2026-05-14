@@ -25,8 +25,8 @@ function BluetoothPage() {
     return () => clearInterval(id);
   }, []);
 
-  const connected = ble.state === "connected";
-  const reconnecting = ble.state === "reconnecting" || ble.state === "connecting";
+  const connected = ble.isLive();
+  const reconnecting = ble.state === "reconnecting" || ble.state === "connecting" || ble.state === "discovering" || ble.state === "subscribing";
   const supported = ble.isSupported();
   const savedName = ble.savedDeviceName();
 
