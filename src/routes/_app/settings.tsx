@@ -20,6 +20,8 @@ function SettingsPage() {
   const [prefs, setPrefs] = useState<Prefs>(() => (typeof window === "undefined" ? defaultPrefs() : loadPrefs()));
   const [, setTick] = useState(0);
   const [rawUuid, setRawUuid] = useState<string>(ble.rawCharUuid ?? "");
+  const [rawSvc, setRawSvc] = useState<string>(ble.rawSvcUuid ?? "");
+  const [scanSvcs, setScanSvcs] = useState<string>(ble.scanServices.join(", "));
   useEffect(() => { savePrefs(prefs); }, [prefs]);
   useEffect(() => {
     const u = ble.subscribe(() => setTick((t) => t + 1));
