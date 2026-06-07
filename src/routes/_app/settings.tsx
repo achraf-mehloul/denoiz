@@ -74,6 +74,31 @@ function SettingsPage() {
 
       <Section title="Bluetooth">
         <Toggle label="Auto-reconnect to last device" value={ble.autoReconnect} onChange={(v) => ble.setAutoReconnect(v)} />
+        <Row label="Scan mode" hint="HR = standard heart-rate sensors · Services = filter by UUID · All = any nearby BLE device (DIY/ESP32)">
+          <div className="flex gap-2 flex-wrap">
+            {(["hr", "services", "all"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => ble.setScanMode(m)}
+                className={`px-3 py-1.5 rounded border text-xs ${ble.scanMode === m ? "bg-primary text-primary-foreground border-primary" : "border-border hover:bg-secondary/40"}`}
+              >{m === "hr" ? "Heart Rate" : m === "services" ? "By Services" : "Accept All"}</button>
+            ))}
+          </div>
+        </Row>
+        {ble.scanMode === "services" && (
+          <Row label="Scan service UUIDs" hint="Comma-separated 16-bit (0x180D) or 128-bit UUIDs">
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={scanSvcs}
+                onChange={(e) => setScanSvcs(e.target.value)}
+                placeholder="heart_rate, 12345678-1234-5678-1234-56789abcdef0"
+                className="flex-1 px-3 py-1.5 rounded border border-border bg-background text-mono text-xs"
+              />
+              <button onClick={() => ble.setScanServices(scanSvcs.split(","))} className="px-3 py-1.5 rounded bg-primary text-primary-foreground text-xs">Save</button>
+            </div>
+          </Row>
+        )}
         <Row label="Saved device" hint={ble.savedDeviceName() ?? "None"}>
           <button
             onClick={() => ble.forgetDevice()}
@@ -81,13 +106,25 @@ function SettingsPage() {
             className="px-3 py-1.5 rounded border border-border text-xs hover:bg-secondary/40 disabled:opacity-30"
           >Forget device</button>
         </Row>
-        <Row label="Raw stream UUID" hint="Optional · 128-bit characteristic streaming Float32 LE samples">
+        <Row label="Raw stream Service UUID" hint="Optional · service that contains the raw waveform characteristic">
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={rawSvc}
+              onChange={(e) => setRawSvc(e.target.value)}
+              placeholder="12345678-1234-5678-1234-56789abcdef0"
+              className="flex-1 px-3 py-1.5 rounded border border-border bg-background text-mono text-xs"
+            />
+            <button onClick={() => ble.setRawSvcUuid(rawSvc || null)} className="px-3 py-1.5 rounded bg-primary text-primary-foreground text-xs">Save</button>
+          </div>
+        </Row>
+        <Row label="Raw stream Char UUID" hint="Float32 little-endian samples · notify">
           <div className="flex gap-2">
             <input
               type="text"
               value={rawUuid}
               onChange={(e) => setRawUuid(e.target.value)}
-              placeholder="00002a37-0000-1000-8000-00805f9b34fb"
+              placeholder="12345678-1234-5678-1234-56789abcdef1"
               className="flex-1 px-3 py-1.5 rounded border border-border bg-background text-mono text-xs"
             />
             <button onClick={() => ble.setRawCharUuid(rawUuid || null)} className="px-3 py-1.5 rounded bg-primary text-primary-foreground text-xs">Save</button>
