@@ -47,7 +47,7 @@ function BluetoothPage() {
             <div className="text-muted-foreground mt-1">{sup.hint}</div>
             {sup.isIos && (
               <div className="text-xs text-muted-foreground mt-2">
-                Recommended on iOS: install the <a href="https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055" target="_blank" rel="noreferrer" className="text-primary underline-offset-2 hover:underline">Bluefy</a> browser, then open Denex inside it.
+                Recommended on iOS: install the <a href="https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055" target="_blank" rel="noreferrer" className="text-primary underline-offset-2 hover:underline">Bluefy</a> browser, then open Denoiz inside it.
               </div>
             )}
           </div>
