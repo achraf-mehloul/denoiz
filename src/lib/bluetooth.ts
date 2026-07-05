@@ -142,7 +142,7 @@ class BluetoothManager {
     const isSecureContext = typeof window !== "undefined" ? window.isSecureContext : false;
     let hint = "";
     if (!supported) {
-      if (isIos) hint = "iOS/iPadOS does not expose Web Bluetooth in any browser. Use the Bluefy browser, or open Denex on Chrome/Edge desktop or Android.";
+      if (isIos) hint = "iOS/iPadOS does not expose Web Bluetooth in any browser. Use the Bluefy browser, or open Denoiz on Chrome/Edge desktop or Android.";
       else if (isSafari) hint = "Safari does not implement Web Bluetooth. Use Chrome, Edge, or Opera.";
       else if (isFirefox) hint = "Firefox does not enable Web Bluetooth by default. Use Chrome, Edge, or Opera.";
       else hint = "Your browser does not support Web Bluetooth. Try Chrome, Edge, or Opera over HTTPS.";
