@@ -1,8 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
+import { Moon, Sun, Bell, BellOff } from "lucide-react";
 import { ble } from "@/lib/bluetooth";
 import { calibration } from "@/lib/calibration";
 import { clearAllSessions } from "@/lib/db";
+import { theme } from "@/lib/theme";
+import { notifyEnabled, notifySupported, requestNotify, setNotifyEnabled } from "@/lib/notify";
 
 export const Route = createFileRoute("/_app/settings")({
   component: SettingsPage,
