@@ -1,7 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { motion } from "framer-motion";
-import { Heart, Activity, Signal, Battery, Gauge, ZapOff, Timer, TrendingUp, Circle, Square, Bluetooth, Waves, Sliders, Camera, PlayCircle } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { Heart, Activity, Signal, Battery, Gauge, ZapOff, Timer, TrendingUp, Circle, Square, Bluetooth, Waves, Sliders, Camera, PlayCircle, RefreshCw } from "lucide-react";
 import { EcgWaveform } from "@/components/EcgWaveform";
 import { BpmHistory } from "@/components/BpmHistory";
 import { StatTile } from "@/components/StatTile";
@@ -23,6 +23,12 @@ export const Route = createFileRoute("/_app/")({ component: Dashboard });
 function Dashboard() {
   const [, setTick] = useState(0);
   const dashRef = useRef<HTMLDivElement | null>(null);
+  const heroRef = useRef<HTMLDivElement | null>(null);
+  const [heroVisible, setHeroVisible] = useState(true);
+  const [pull, setPull] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const pullStart = useRef<number | null>(null);
+
   useEffect(() => {
     const u1 = ble.subscribe(() => setTick((t) => t + 1));
     const u2 = signal.subscribe(() => setTick((t) => t + 1));
@@ -31,6 +37,50 @@ function Dashboard() {
     const id = setInterval(() => setTick((t) => t + 1), 500);
     return () => { u1(); u2(); u3(); u4(); clearInterval(id); };
   }, []);
+
+  // Observe hero card for sticky mini-waveform trigger
+  useEffect(() => {
+    if (!heroRef.current) return;
+    const obs = new IntersectionObserver(
+      ([entry]) => setHeroVisible(entry.isIntersecting),
+      { threshold: 0.15 }
+    );
+    obs.observe(heroRef.current);
+    return () => obs.disconnect();
+  }, []);
+
+  // Pull-to-refresh: swipe down at top of scroll → reconnect BLE
+  useEffect(() => {
+    const onStart = (e: TouchEvent) => {
+      if (window.scrollY > 0) return;
+      pullStart.current = e.touches[0].clientY;
+    };
+    const onMove = (e: TouchEvent) => {
+      if (pullStart.current === null) return;
+      const dy = e.touches[0].clientY - pullStart.current;
+      if (dy > 0) setPull(Math.min(dy * 0.5, 90));
+    };
+    const onEnd = async () => {
+      if (pullStart.current === null) return;
+      const p = pull;
+      pullStart.current = null;
+      if (p > 60 && !refreshing) {
+        setRefreshing(true);
+        try { await ble.reconnect(); } catch { /* noop */ }
+        setTimeout(() => { setRefreshing(false); setPull(0); }, 800);
+      } else {
+        setPull(0);
+      }
+    };
+    window.addEventListener("touchstart", onStart, { passive: true });
+    window.addEventListener("touchmove", onMove, { passive: true });
+    window.addEventListener("touchend", onEnd);
+    return () => {
+      window.removeEventListener("touchstart", onStart);
+      window.removeEventListener("touchmove", onMove);
+      window.removeEventListener("touchend", onEnd);
+    };
+  }, [pull, refreshing]);
 
   // Alert on disconnect during recording
   const prevLive = useRef(false);
@@ -74,10 +124,48 @@ function Dashboard() {
 
   return (
     <div ref={dashRef} className="p-4 md:p-8 space-y-5 max-w-[1600px] mx-auto">
+      {/* Pull-to-refresh indicator (mobile) */}
+      <AnimatePresence>
+        {(pull > 8 || refreshing) && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: Math.min(pull, 90) - 24 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="md:hidden fixed top-9 inset-x-0 z-30 flex justify-center pointer-events-none"
+          >
+            <div className="rounded-full glass px-3 py-1.5 flex items-center gap-2 text-[10px] uppercase tracking-widest">
+              <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? "animate-spin" : ""}`} style={{ transform: refreshing ? undefined : `rotate(${pull * 4}deg)` }} />
+              {refreshing ? "Reconnexion…" : pull > 60 ? "Relâcher pour reconnecter" : "Tirer pour reconnecter"}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Sticky mini-waveform when hero scrolls off (mobile) */}
+      <AnimatePresence>
+        {!heroVisible && hasAnyRealData && snap.hasRawWaveform && (
+          <motion.div
+            initial={{ y: -60, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -60, opacity: 0 }}
+            className="md:hidden fixed top-9 inset-x-0 z-20 h-14 glass border-b border-border/60 px-3 flex items-center gap-3"
+          >
+            <div className="flex items-baseline gap-1 shrink-0">
+              <Heart className={`h-3.5 w-3.5 ${snap.bpm > 0 ? "text-primary heartbeat" : "text-muted-foreground"}`} />
+              <span className="text-mono font-display text-lg text-primary tabular-nums">{snap.bpm || "—"}</span>
+              <span className="text-[9px] text-muted-foreground">bpm</span>
+            </div>
+            <div className="flex-1 h-full py-1.5 min-w-0">
+              <EcgWaveform label="" color="oklch(0.78 0.18 155)" channel="filtered" height={40} compact />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
         <div className="min-w-0">
           <div className="text-[10px] uppercase tracking-[0.28em] text-muted-foreground">Moniteur temps réel</div>
-          <h1 className="font-display text-2xl md:text-4xl mt-1 tracking-tight">Tableau de bord ECG</h1>
+          <h1 className="font-display text-3xl sm:text-4xl md:text-5xl mt-1 tracking-tighter">Tableau de bord ECG</h1>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end" data-snapshot-exclude="true">
           {!live && (
@@ -86,7 +174,7 @@ function Dashboard() {
             </button>
           )}
           <button onClick={onSnapshot} disabled={!hasAnyRealData} className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border border-border text-xs disabled:opacity-40 hover:bg-secondary/40">
-            <Camera className="h-3.5 w-3.5" /> Snapshot PNG
+            <Camera className="h-3.5 w-3.5" /> <span className="hidden xs:inline sm:inline">Snapshot PNG</span><span className="sm:hidden">PNG</span>
           </button>
         </div>
       </div>
@@ -103,11 +191,40 @@ function Dashboard() {
         <EmptyState icon={Waves} title="En attente du premier paquet" description="Le lien est établi. Denoiz révélera les métriques et les ondes dès que le capteur transmettra." />
       ) : (
         <>
-          {/* Bento grid — mixed sizes */}
+          {/* Mobile Hero-BPM (huge) — collapses into the bento grid on md+ */}
+          <div ref={heroRef} className="md:hidden rounded-3xl glass p-6 relative overflow-hidden">
+            <div className="flex items-center justify-between">
+              <div className="text-[10px] uppercase tracking-[0.28em] text-muted-foreground">Rythme cardiaque</div>
+              <Heart className={`h-6 w-6 ${snap.bpm > 0 ? "text-primary heartbeat" : "text-muted-foreground"}`} />
+            </div>
+            <div className="mt-3 flex items-baseline gap-2">
+              <AnimatePresence mode="popLayout">
+                <motion.span
+                  key={snap.bpm}
+                  initial={{ y: 20, opacity: 0 }}
+                  animate={{ y: 0, opacity: 1 }}
+                  exit={{ y: -20, opacity: 0 }}
+                  transition={{ duration: 0.2 }}
+                  className="font-display text-[104px] leading-none text-primary tracking-tighter tabular-nums"
+                >
+                  {snap.bpm > 0 ? snap.bpm : "—"}
+                </motion.span>
+              </AnimatePresence>
+              <span className="text-mono text-base text-muted-foreground">bpm</span>
+            </div>
+            <div className="mt-4 grid grid-cols-3 gap-3 text-[11px] text-mono">
+              <div><div className="text-muted-foreground uppercase tracking-widest text-[9px]">Moy</div><div className="text-foreground text-base">{snap.bpmAvg || "—"}</div></div>
+              <div><div className="text-muted-foreground uppercase tracking-widest text-[9px]">Min</div><div className="text-foreground text-base">{snap.bpmMin || "—"}</div></div>
+              <div><div className="text-muted-foreground uppercase tracking-widest text-[9px]">Max</div><div className="text-foreground text-base">{snap.bpmMax || "—"}</div></div>
+            </div>
+            <div className="absolute -right-10 -bottom-10 h-52 w-52 rounded-full bg-primary/15 blur-3xl pointer-events-none" />
+          </div>
+
+          {/* Bento grid — mixed sizes (desktop keeps original hero card) */}
           <div className="grid grid-cols-2 md:grid-cols-6 lg:grid-cols-12 gap-3 auto-rows-[minmax(0,auto)]">
             <motion.div
               layout
-              className="col-span-2 md:col-span-3 lg:col-span-4 lg:row-span-2 rounded-2xl glass p-6 flex flex-col justify-between overflow-hidden relative"
+              className="hidden md:flex col-span-2 md:col-span-3 lg:col-span-4 lg:row-span-2 rounded-2xl glass p-6 flex-col justify-between overflow-hidden relative"
             >
               <div className="flex items-center justify-between">
                 <div className="text-[10px] uppercase tracking-[0.28em] text-muted-foreground">Rythme cardiaque</div>
@@ -145,7 +262,8 @@ function Dashboard() {
             </div>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2" data-snapshot-exclude="true">
+          {/* Desktop control row (mobile uses FAB below) */}
+          <div className="hidden md:flex flex-wrap items-center gap-2" data-snapshot-exclude="true">
             <button
               onClick={onToggleRecord}
               className={`inline-flex items-center gap-2 px-4 py-2 rounded-full text-sm font-medium ${signal.recording ? "bg-[oklch(0.65_0.22_25)] text-white" : "bg-primary text-primary-foreground hover:opacity-90 glow-primary"}`}
@@ -190,6 +308,27 @@ function Dashboard() {
               </div>
             </div>
           )}
+
+          {/* Mobile REC FAB */}
+          <motion.button
+            data-snapshot-exclude="true"
+            onClick={onToggleRecord}
+            initial={{ scale: 0, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            whileTap={{ scale: 0.92 }}
+            className={`md:hidden fixed right-4 z-30 h-16 w-16 rounded-full shadow-2xl flex items-center justify-center ${signal.recording ? "bg-[oklch(0.65_0.22_25)] text-white" : "bg-primary text-primary-foreground glow-primary"}`}
+            style={{ bottom: "calc(5.25rem + env(safe-area-inset-bottom))" }}
+            aria-label={signal.recording ? "Arrêter l'enregistrement" : "Démarrer l'enregistrement"}
+          >
+            {signal.recording ? (
+              <div className="flex flex-col items-center leading-none">
+                <Square className="h-5 w-5" />
+                <span className="text-[9px] text-mono mt-0.5">{fmtSec(recordedSec)}</span>
+              </div>
+            ) : (
+              <Circle className="h-6 w-6 fill-current" />
+            )}
+          </motion.button>
         </>
       )}
 
