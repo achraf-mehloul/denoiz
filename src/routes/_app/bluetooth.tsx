@@ -36,7 +36,7 @@ function BluetoothPage() {
       <div>
         <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground">Connectivity</div>
         <h1 className="text-2xl md:text-3xl font-semibold mt-1">Bluetooth Device Center</h1>
-        <p className="text-sm text-muted-foreground mt-2 max-w-2xl">Pair, monitor and manage low-energy biomedical sensors over the Web Bluetooth API. Denex auto-reconnects with exponential backoff and remembers your device across app restarts.</p>
+        <p className="text-sm text-muted-foreground mt-2 max-w-2xl">Pair, monitor and manage low-energy biomedical sensors over the Web Bluetooth API. Denoiz auto-reconnects with exponential backoff and remembers your device across app restarts.</p>
       </div>
 
       {!supported && (
